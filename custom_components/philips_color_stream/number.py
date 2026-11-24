@@ -16,7 +16,9 @@ async def async_setup_entry(
     entry: ColorStreamConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    async_add_entities([ColorStreamSpeed(entry.runtime_data, entry.title)])
+    device: ColorStreamDevice = entry.runtime_data
+    if device.supports_speed:
+        async_add_entities([ColorStreamSpeed(device, entry.title)])
 
 
 class ColorStreamSpeed(ColorStreamEntity, RestoreNumber):

@@ -95,6 +95,11 @@ class ColorStreamDevice:
             return (1, 4)
         return (1, 100)
 
+    @property
+    def supports_speed(self) -> bool:
+        """DoubleColor hardware does not support speed control; only legacy models do."""
+        return self._device_type != TYPE_DOUBLE_COLOR
+
     def set_ble_device(self, ble_device: BLEDevice) -> None:
         self._ble_device = ble_device
         self._telink_proto.set_mac(ble_device.address)
@@ -136,9 +141,9 @@ class ColorStreamDevice:
     async def set_speed(self, speed_value: int) -> None:
         _LOGGER.debug("set_speed called for %s: %s", self.address, speed_value)
         if self._device_type == TYPE_DOUBLE_COLOR:
-            await self._send_telink(self._telink_proto.cmd_speed(speed_value))
-        else:
-            await self._send_legacy(legacy_protocol.cmd_speed(self._legacy_id, speed_value))
+            _LOGGER.debug("Speed control not supported on DoubleColor hardware; ignoring")
+            return
+        await self._send_legacy(legacy_protocol.cmd_speed(self._legacy_id, speed_value))
 
     async def disconnect(self) -> None:
         self._cancel_timer()
