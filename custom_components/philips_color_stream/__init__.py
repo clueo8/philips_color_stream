@@ -19,11 +19,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ColorStreamConfigEntry) 
     address: str = entry.data[CONF_ADDRESS]
     ble_device = bluetooth.async_ble_device_from_address(
         hass, address.upper(), connectable=True
+    ) or bluetooth.async_ble_device_from_address(
+        hass, address.lower(), connectable=True
     )
     if ble_device is None:
         raise ConfigEntryNotReady(f"Could not find Color Stream / DoubleColor lights at {address}")
 
-    device = ColorStreamDevice(ble_device, DISCONNECT_DELAY)
+    device = ColorStreamDevice(ble_device, DISCONNECT_DELAY, hass=hass)
     entry.runtime_data = device
 
     @callback
@@ -33,11 +35,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ColorStreamConfigEntry) 
     ) -> None:
         device.set_ble_device(service_info.device)
 
+    # Register for both uppercase and lowercase MAC format matchers
     entry.async_on_unload(
         bluetooth.async_register_callback(
             hass,
             _async_update_ble,
-            bluetooth.BluetoothCallbackMatcher(address=address, connectable=True),
+            bluetooth.BluetoothCallbackMatcher(address=address.lower(), connectable=True),
+            bluetooth.BluetoothScanningMode.PASSIVE,
+        )
+    )
+    entry.async_on_unload(
+        bluetooth.async_register_callback(
+            hass,
+            _async_update_ble,
+            bluetooth.BluetoothCallbackMatcher(address=address.upper(), connectable=True),
             bluetooth.BluetoothScanningMode.PASSIVE,
         )
     )
