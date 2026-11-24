@@ -215,6 +215,10 @@ class ColorStreamDevice:
                         return c
 
         discovered = {s.uuid: [c.uuid for c in s.characteristics] for s in client.services} if client.services else {}
+        try:
+            clear_cache(self._ble_device)
+        except Exception:
+            pass
         raise BleakError(
             f"Characteristic {target_uuid} was not found on {self.address}! Discovered services: {discovered}"
         )

@@ -131,7 +131,7 @@ class TelinkMeshProtocol:
             seq = self._seq.to_bytes(3, "little")
 
         if dest is None:
-            dest = self.unicast_mesh_address
+            dest = BROADCAST_DEST
 
         nonce = bytes(self.mac_rev[0:4]) + b"\x01" + seq
         dest_bytes = dest.to_bytes(2, "little")
