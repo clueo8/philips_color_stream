@@ -62,6 +62,7 @@ class ColorStreamDevice:
         self._client: BleakClientWithServiceCache | None = None
         self._lock = asyncio.Lock()
         self._disconnect_timer: asyncio.TimerHandle | None = None
+        self._force_fresh_services: bool = False
 
         # Telink specific state
         self._telink_proto = TelinkMeshProtocol(ble_device.address)
@@ -189,6 +190,25 @@ class ColorStreamDevice:
                     await asyncio.sleep(0.5)
         self._reset_timer()
 
+    def _has_required_services(self, client: BleakClientWithServiceCache) -> bool:
+        """Check if discovered services contain the required Telink or Legacy characteristics."""
+        if not client.services:
+            return False
+        if self._device_type == TYPE_DOUBLE_COLOR:
+            for s in client.services:
+                for c in s.characteristics:
+                    c_clean = c.uuid.lower().replace("-", "")
+                    if "1914" in c_clean or "1419" in c_clean or "1912" in c_clean or "1219" in c_clean:
+                        return True
+            return False
+        else:
+            for s in client.services:
+                for c in s.characteristics:
+                    c_clean = c.uuid.lower().replace("-", "")
+                    if "fff2" in c_clean or "f2ff" in c_clean:
+                        return True
+            return False
+
     async def _find_char(
         self, client: BleakClientWithServiceCache, target_uuid: str
     ) -> BleakGATTCharacteristic:
@@ -220,8 +240,11 @@ class ColorStreamDevice:
                         return c
 
         discovered = {s.uuid: [c.uuid for c in s.characteristics] for s in client.services} if client.services else {}
+        self._force_fresh_services = True
         try:
-            clear_cache(self._ble_device)
+            if hasattr(client, "clear_cache"):
+                await client.clear_cache()
+            await clear_cache(self.address)
         except Exception:
             pass
         raise BleakError(
@@ -242,13 +265,51 @@ class ColorStreamDevice:
             if fresh_ble is not None:
                 self._ble_device = fresh_ble
 
-        _LOGGER.debug("Connecting to %s (%s)", self.address, self._device_type)
+        use_cache = not self._force_fresh_services
+        self._force_fresh_services = False
+
+        _LOGGER.debug("Connecting to %s (%s, use_services_cache=%s)", self.address, self._device_type, use_cache)
         client = await establish_connection(
             BleakClientWithServiceCache,
             self._ble_device,
             self._ble_device.name or self.address,
             disconnected_callback=self._on_disconnected,
+            use_services_cache=use_cache,
         )
+
+        # Validate that required services/characteristics are discovered
+        if not self._has_required_services(client):
+            _LOGGER.warning(
+                "Discovered services on %s are incomplete (%s). Clearing client cache and refreshing...",
+                self.address,
+                {s.uuid: [c.uuid for c in s.characteristics] for s in client.services} if client.services else {},
+            )
+            try:
+                if hasattr(client, "clear_cache"):
+                    await client.clear_cache()
+                await client.get_services()
+            except Exception as ex:
+                _LOGGER.debug("Error refreshing services on %s: %s", self.address, ex)
+
+        # If STILL incomplete after refresh, reconnect once forcing fresh discovery
+        if not self._has_required_services(client) and use_cache:
+            _LOGGER.warning("Services on %s still incomplete. Reconnecting with fresh service discovery...", self.address)
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+            try:
+                await clear_cache(self.address)
+            except Exception:
+                pass
+            client = await establish_connection(
+                BleakClientWithServiceCache,
+                self._ble_device,
+                self._ble_device.name or self.address,
+                disconnected_callback=self._on_disconnected,
+                use_services_cache=False,
+            )
+
         self._client = client
 
         if self._device_type == TYPE_DOUBLE_COLOR:
