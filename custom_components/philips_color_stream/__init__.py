@@ -10,7 +10,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from .const import DISCONNECT_DELAY
 from .device import ColorStreamDevice
 
-PLATFORMS = [Platform.LIGHT, Platform.NUMBER]
+PLATFORMS = [Platform.LIGHT, Platform.NUMBER, Platform.SELECT]
 
 type ColorStreamConfigEntry = ConfigEntry[ColorStreamDevice]
 

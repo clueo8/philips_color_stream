@@ -26,14 +26,12 @@ BROADCAST_DEST = 0xFFFF    # 0xFFFF little-endian
 DEFAULT_MESH_NAME = b"DoubleColor"
 DEFAULT_PASSWORD  = b"123"
 
-# Common known MAC addresses discovered from user's bug report:
 KNOWN_MACS = [
     "57:4c:42:01:c9:5a",
     "57:4c:42:c5:2c:a6",
     "57:4c:42:fd:47:e9",
 ]
 
-# WLT Mode definitions
 MODES = {
     "combo":        (0x01, False),
     "steady_white": (0x02, True),
@@ -62,7 +60,7 @@ class TelinkMeshProtocol:
             self.password.ljust(16, b"\x00")
         ))
         self.session_key: bytes | None = None
-        self._seq = 1
+        self._seq = (int.from_bytes(os.urandom(3), "little") & 0x7FFFFF) + 1000
 
     @staticmethod
     def enc_noout(key: bytes, value: bytes) -> bytes:
@@ -114,6 +112,7 @@ class TelinkMeshProtocol:
     def derive_session_key(self, randm: bytes, rands: bytes) -> bytes:
         """Derive the 16-byte session key from client and device randoms."""
         self.session_key = self.enc_noout(self.creds, randm + rands)[::-1]
+        self._seq = (int.from_bytes(os.urandom(3), "little") & 0x7FFFFF) + 1000
         return self.session_key
 
     def build_command_packet(self, wlt_payload: bytes, seq: bytes | None = None) -> bytes:
@@ -122,10 +121,11 @@ class TelinkMeshProtocol:
             raise RuntimeError("Must complete login handshake before building commands")
         if seq is None:
             self._seq = (self._seq + 1) & 0xFFFFFF
+            if self._seq == 0:
+                self._seq = 1000
             seq = self._seq.to_bytes(3, "little")
 
         nonce = bytes(self.mac_rev[0:4]) + b"\x01" + seq
-        # Payload layout: dest(2, LE) + opcode(0xF0) + VENDOR(11 02) + wlt_payload, padded to 15 bytes
         dest_bytes = BROADCAST_DEST.to_bytes(2, "little")
         opcode = 0xF0
         inner_payload = (dest_bytes + bytes([opcode]) + VENDOR + wlt_payload).ljust(15, b"\x00")
@@ -137,24 +137,20 @@ class TelinkMeshProtocol:
     # WLT Command Generators
     @staticmethod
     def cmd_power(on: bool) -> bytes:
-        """574C54 02 11 01 (ON) or 574C54 02 11 02 (OFF)."""
         return b"WLT\x02\x11" + (b"\x01" if on else b"\x02")
 
     @staticmethod
     def cmd_mode(mode_id: int, steady: bool = False) -> bytes:
-        """574C54 02 <mode> <modifier>."""
         modifier = 0xE0 if steady else 0x00
         return b"WLT\x02" + bytes([mode_id, modifier])
 
     @staticmethod
     def cmd_brightness(percent: int) -> bytes:
-        """574C54 02 09 <percent_hex> 00 (0..100%)."""
         pct = max(0, min(100, percent))
         return b"WLT\x02\x09" + bytes([pct, 0x00])
 
     @staticmethod
     def cmd_speed(speed: int) -> bytes:
-        """574C54 03 0C 01 <speed> (1..4)."""
         spd = max(1, min(4, speed))
         return b"WLT\x03\x0c\x01" + bytes([spd])
 
@@ -195,38 +191,39 @@ async def run_command_on_device(mac: str, action: str, param: int | str | None =
 
         # Build requested command
         if action == "on":
-            print("Sending: Power ON")
+            print("Sending: Power ON (3 bursts)")
             payload = proto.cmd_power(True)
         elif action == "off":
-            print("Sending: Power OFF")
+            print("Sending: Power OFF (3 bursts)")
             payload = proto.cmd_power(False)
         elif action == "brightness":
             pct = int(param) if param is not None else 100
-            print(f"Sending: Brightness {pct}%")
+            print(f"Sending: Brightness {pct}% (3 bursts)")
             payload = proto.cmd_brightness(pct)
         elif action == "mode":
             mode_name = str(param).lower()
             if mode_name in MODES:
                 m_id, steady = MODES[mode_name]
-                print(f"Sending: Mode '{mode_name}' (ID: {m_id}, steady: {steady})")
+                print(f"Sending: Mode '{mode_name}' (ID: {m_id}, steady: {steady}) (3 bursts)")
                 payload = proto.cmd_mode(m_id, steady)
             else:
                 m_id = int(param)
-                print(f"Sending: Mode ID {m_id}")
+                print(f"Sending: Mode ID {m_id} (3 bursts)")
                 payload = proto.cmd_mode(m_id, False)
         elif action == "speed":
             spd = int(param) if param is not None else 1
-            print(f"Sending: Speed {spd}")
+            print(f"Sending: Speed {spd} (3 bursts)")
             payload = proto.cmd_speed(spd)
         else:
             print(f"Unknown action: {action}")
             return
 
-        cmd_pkt = proto.build_command_packet(payload)
-        print(f"Encrypted GATT write to {UUID_COMMAND}: {cmd_pkt.hex()}")
-        await client.write_gatt_char(UUID_COMMAND, cmd_pkt, response=False)
-        await asyncio.sleep(0.5)
-        print("Command sent successfully!")
+        for b in range(3):
+            cmd_pkt = proto.build_command_packet(payload)
+            await client.write_gatt_char(UUID_COMMAND, cmd_pkt, response=False)
+            if b < 2:
+                await asyncio.sleep(0.04)
+        print("Command transmitted successfully in 3 bursts!")
 
 
 def main():

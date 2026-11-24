@@ -21,6 +21,11 @@
       "speed": {
         "name": "Effect speed"
       }
+    },
+    "select": {
+      "mode": {
+        "name": "Light mode"
+      }
     }
   }
 }

@@ -38,7 +38,6 @@ def detect_device_type(ble_device: BLEDevice) -> str:
         return TYPE_DOUBLE_COLOR
     if name.startswith("GV_RGB"):
         return TYPE_LEGACY_WLT
-    # Fallback to DoubleColor if unknown (since user has DoubleColor)
     return TYPE_DOUBLE_COLOR
 
 
@@ -92,24 +91,28 @@ class ColorStreamDevice:
     # ------------------------------------------------------------------ public
 
     async def turn_on(self) -> None:
+        _LOGGER.debug("turn_on called for %s", self.address)
         if self._device_type == TYPE_DOUBLE_COLOR:
             await self._send_telink(self._telink_proto.cmd_power(True))
         else:
             await self._send_legacy(legacy_protocol.cmd_power(self._legacy_id, True))
 
     async def turn_off(self) -> None:
+        _LOGGER.debug("turn_off called for %s", self.address)
         if self._device_type == TYPE_DOUBLE_COLOR:
             await self._send_telink(self._telink_proto.cmd_power(False))
         else:
             await self._send_legacy(legacy_protocol.cmd_power(self._legacy_id, False))
 
     async def set_brightness(self, percent: int) -> None:
+        _LOGGER.debug("set_brightness called for %s: %s%%", self.address, percent)
         if self._device_type == TYPE_DOUBLE_COLOR:
             await self._send_telink(self._telink_proto.cmd_brightness(percent))
         else:
             _LOGGER.debug("Brightness not supported by legacy GV_RGB firmware")
 
     async def set_effect(self, name: str) -> None:
+        _LOGGER.debug("set_effect called for %s: %s", self.address, name)
         if self._device_type == TYPE_DOUBLE_COLOR:
             if name in DOUBLE_COLOR_EFFECTS:
                 mode_id, steady = DOUBLE_COLOR_EFFECTS[name]
@@ -120,6 +123,7 @@ class ColorStreamDevice:
                 await self._send_legacy(legacy_protocol.cmd_effect(self._legacy_id, mode_num, modifier))
 
     async def set_speed(self, speed_value: int) -> None:
+        _LOGGER.debug("set_speed called for %s: %s", self.address, speed_value)
         if self._device_type == TYPE_DOUBLE_COLOR:
             await self._send_telink(self._telink_proto.cmd_speed(speed_value))
         else:
@@ -137,8 +141,13 @@ class ColorStreamDevice:
             for attempt in (1, 2):
                 try:
                     client = await self._ensure_connected()
-                    packet = self._telink_proto.build_command_packet(wlt_payload)
-                    await client.write_gatt_char(UUID_COMMAND, packet, response=False)
+                    # Replicate the official Telink app: transmit 3 bursts with incrementing seq
+                    for b in range(3):
+                        packet = self._telink_proto.build_command_packet(wlt_payload)
+                        await client.write_gatt_char(UUID_COMMAND, packet, response=False)
+                        if b < 2:
+                            await asyncio.sleep(0.04)
+                    _LOGGER.debug("Successfully transmitted 3 bursts to %s: %s", self.address, wlt_payload.hex())
                     break
                 except (BleakError, Exception) as err:
                     _LOGGER.warning("Telink write failed on %s (attempt %s): %s", self.address, attempt, err)
@@ -196,7 +205,7 @@ class ColorStreamDevice:
         self._telink_proto.derive_session_key(randm, rands)
         _LOGGER.debug("Authenticated with %s. Session key established.", self.address)
 
-        # Enable notifications on 1911
+        # Enable notifications on 1911 non-critically
         try:
             await client.start_notify(UUID_NOTIFY, lambda _s, _d: None)
             await client.write_gatt_char(UUID_NOTIFY, b"\x01", response=True)

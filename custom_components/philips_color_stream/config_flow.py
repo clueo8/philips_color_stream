@@ -16,11 +16,7 @@ from .const import DOMAIN
 
 def _is_supported(info: BluetoothServiceInfoBleak) -> bool:
     name = info.name or ""
-    if name.startswith("DoubleColor") or name.startswith("BiColor") or name.startswith("GV_RGB_"):
-        return True
-    if 529 in info.manufacturer_data:  # 0x0211 Telink Semiconductor
-        return True
-    return False
+    return name.startswith("DoubleColor") or name.startswith("BiColor") or name.startswith("GV_RGB_")
 
 
 class ColorStreamConfigFlow(ConfigFlow, domain=DOMAIN):

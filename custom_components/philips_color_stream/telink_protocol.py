@@ -43,7 +43,11 @@ class TelinkMeshProtocol:
             self.password.ljust(16, b"\x00")
         ))
         self.session_key: bytes | None = None
-        self._seq = 1
+        self._refresh_seq()
+
+    def _refresh_seq(self) -> None:
+        """Start sequence number at a high random 24-bit value to avoid replay filter drops."""
+        self._seq = (int.from_bytes(os.urandom(3), "little") & 0x7FFFFF) + 1000
 
     @staticmethod
     def enc_noout(key: bytes, value: bytes) -> bytes:
@@ -96,6 +100,7 @@ class TelinkMeshProtocol:
     def derive_session_key(self, randm: bytes, rands: bytes) -> bytes:
         """Derive the 16-byte session key from client and device randoms."""
         self.session_key = self.enc_noout(self.creds, randm + rands)[::-1]
+        self._refresh_seq()
         return self.session_key
 
     def build_command_packet(self, wlt_payload: bytes, seq: bytes | None = None) -> bytes:
@@ -104,6 +109,8 @@ class TelinkMeshProtocol:
             raise RuntimeError("Must complete login handshake before building commands")
         if seq is None:
             self._seq = (self._seq + 1) & 0xFFFFFF
+            if self._seq == 0:
+                self._seq = 1000
             seq = self._seq.to_bytes(3, "little")
 
         nonce = bytes(self.mac_rev[0:4]) + b"\x01" + seq
