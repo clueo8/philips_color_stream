@@ -6,9 +6,9 @@ MODEL_DOUBLE_COLOR = "ColorStream+ (DoubleColor)"
 MODEL_LEGACY = "Color Stream (GV_RGB)"
 
 # Seconds of inactivity before the BLE connection is dropped.
-# The lights only accept one connection at a time, so releasing it lets the
-# phone app or other controllers connect again.
-DISCONNECT_DELAY = 45
+# The lights only accept one connection at a time, so releasing it quickly lets the
+# other strands receive RF mesh packets without radio collision, and lets other controllers connect.
+DISCONNECT_DELAY = 2.0
 DEFAULT_SPEED = 1
 
 # Supported device types

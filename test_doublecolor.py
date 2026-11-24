@@ -117,7 +117,6 @@ class TelinkMeshProtocol:
     def derive_session_key(self, randm: bytes, rands: bytes) -> bytes:
         """Derive the 16-byte session key from client and device randoms."""
         self.session_key = self.enc_noout(self.creds, randm + rands)[::-1]
-        self._seq = (int.from_bytes(os.urandom(3), "little") & 0x7FFFFF) + 1000
         return self.session_key
 
     def build_command_packet(

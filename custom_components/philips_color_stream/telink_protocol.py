@@ -30,6 +30,10 @@ DOUBLE_COLOR_EFFECTS: dict[str, int] = {
 class TelinkMeshProtocol:
     """Handles Telink pairing crypto, session key derivation, and packet encryption."""
 
+    # Monotonically increasing sequence number across all instances.
+    # Initialized once to a random 24-bit value on startup, never reset on reconnection.
+    _shared_seq: int = (int.from_bytes(os.urandom(3), "little") & 0x7FFFFF) + 1000
+
     def __init__(self, mac_address: str, mesh_name: bytes = DEFAULT_MESH_NAME, password: bytes = DEFAULT_PASSWORD):
         self.set_mac(mac_address)
         self.mesh_name = mesh_name
@@ -39,7 +43,7 @@ class TelinkMeshProtocol:
             self.password.ljust(16, b"\x00")
         ))
         self.session_key: bytes | None = None
-        self._refresh_seq()
+        self._seq = TelinkMeshProtocol._shared_seq
 
     def set_mac(self, mac_address: str) -> None:
         """Update MAC and reversed byte representation."""
@@ -52,9 +56,10 @@ class TelinkMeshProtocol:
         """Derive node's unicast mesh address from MAC LSB: 0x0100 | MAC_LSB."""
         return 0x0100 | self.mac_rev[0]
 
-    def _refresh_seq(self) -> None:
+    @classmethod
+    def _refresh_seq(cls) -> None:
         """Start sequence number at a high random 24-bit value to avoid replay filter drops."""
-        self._seq = (int.from_bytes(os.urandom(3), "little") & 0x7FFFFF) + 1000
+        cls._shared_seq = (int.from_bytes(os.urandom(3), "little") & 0x7FFFFF) + 1000
 
     @staticmethod
     def enc_noout(key: bytes, value: bytes) -> bytes:
@@ -107,7 +112,6 @@ class TelinkMeshProtocol:
     def derive_session_key(self, randm: bytes, rands: bytes) -> bytes:
         """Derive the 16-byte session key from client and device randoms."""
         self.session_key = self.enc_noout(self.creds, randm + rands)[::-1]
-        self._refresh_seq()
         return self.session_key
 
     def build_command_packet(
@@ -124,9 +128,10 @@ class TelinkMeshProtocol:
         if self.session_key is None:
             raise RuntimeError("Must complete login handshake before building commands")
         if seq is None:
-            self._seq = (self._seq + 1) & 0xFFFFFF
-            if self._seq == 0:
-                self._seq = 1000
+            TelinkMeshProtocol._shared_seq = (TelinkMeshProtocol._shared_seq + 1) & 0xFFFFFF
+            if TelinkMeshProtocol._shared_seq == 0:
+                TelinkMeshProtocol._shared_seq = 1000
+            self._seq = TelinkMeshProtocol._shared_seq
             seq = self._seq.to_bytes(3, "little")
 
         if dest is None:
