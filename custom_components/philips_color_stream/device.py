@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from datetime import datetime
+import logging
+import uuid
 
 from bleak.backends.characteristic import BleakGATTCharacteristic
 from bleak.backends.device import BLEDevice
@@ -186,48 +187,36 @@ class ColorStreamDevice:
     async def _find_char(
         self, client: BleakClientWithServiceCache, target_uuid: str
     ) -> BleakGATTCharacteristic:
-        """Find a characteristic by exact UUID or suffix, clearing stale cache if missing."""
+        """Find a characteristic by exact UUID, byte-reversed UUID, or 16-bit identifier."""
         if client.services:
+            # 1. Exact match
             char = client.services.get_characteristic(target_uuid)
             if char is not None:
                 return char
 
-            # Check suffix match (e.g. 1914, 1912, 1911)
-            suffix = target_uuid[-4:].lower()
+            # 2. Check byte-reversed UUID (ESPHome big-endian representation)
+            # e.g. 00010203-0405-0607-0809-0a0b0c0d1914 <-> 14190d0c-0b0a-0908-0706-050403020100
+            clean_hex = target_uuid.replace("-", "")
+            if len(clean_hex) == 32:
+                rev_uuid = str(uuid.UUID(bytes=bytes.fromhex(clean_hex)[::-1]))
+                char = client.services.get_characteristic(rev_uuid)
+                if char is not None:
+                    _LOGGER.debug("Matched characteristic %s by reversed UUID for %s", rev_uuid, target_uuid)
+                    return char
+
+            # 3. Match by 4-hex pattern (e.g. '1914' or '1419')
+            s1 = target_uuid[-4:].lower()
+            s2 = s1[2:4] + s1[0:2]
             for s in client.services:
                 for c in s.characteristics:
-                    if c.uuid.lower().replace("-", "").endswith(suffix):
-                        _LOGGER.debug("Matched %s by suffix %s", c.uuid, suffix)
+                    c_clean = c.uuid.lower().replace("-", "")
+                    if s1 in c_clean or s2 in c_clean:
+                        _LOGGER.debug("Matched characteristic %s by identifier %s/%s", c.uuid, s1, s2)
                         return c
 
-        # If not found, clear cache and force fresh service discovery
-        _LOGGER.warning(
-            "Characteristic %s not found in cached services for %s. Clearing cache and rediscovering...",
-            target_uuid,
-            self.address,
-        )
-        try:
-            if hasattr(client, "clear_cache"):
-                await client.clear_cache()
-        except Exception as ex:
-            _LOGGER.debug("clear_cache error on %s: %s", self.address, ex)
-
-        await client.get_services()
-
-        if client.services:
-            char = client.services.get_characteristic(target_uuid)
-            if char is not None:
-                return char
-
-            suffix = target_uuid[-4:].lower()
-            for s in client.services:
-                for c in s.characteristics:
-                    if c.uuid.lower().replace("-", "").endswith(suffix):
-                        return c
-
-        discovered = [f"{c.uuid} (handle {c.handle})" for s in client.services for c in s.characteristics] if client.services else []
+        discovered = {s.uuid: [c.uuid for c in s.characteristics] for s in client.services} if client.services else {}
         raise BleakError(
-            f"Characteristic {target_uuid} was not found on {self.address}! Discovered characteristics: {discovered}"
+            f"Characteristic {target_uuid} was not found on {self.address}! Discovered services: {discovered}"
         )
 
     async def _ensure_connected(self) -> BleakClientWithServiceCache:
@@ -252,10 +241,6 @@ class ColorStreamDevice:
             disconnected_callback=self._on_disconnected,
         )
         self._client = client
-
-        # Populate services if cache is empty
-        if not client.services:
-            await client.get_services()
 
         if self._device_type == TYPE_DOUBLE_COLOR:
             await self._handshake_telink(client)
