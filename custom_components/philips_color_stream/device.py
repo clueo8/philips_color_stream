@@ -280,13 +280,6 @@ class ColorStreamDevice:
         self._telink_proto.derive_session_key(randm, rands)
         _LOGGER.debug("Authenticated with %s. Session key established.", self.address)
 
-        # Enable notifications on 1911 non-critically
-        try:
-            notify_char = await self._find_char(client, UUID_NOTIFY)
-            await client.start_notify(notify_char, lambda _s, _d: None)
-        except Exception as ex:
-            _LOGGER.debug("Notify setup note on %s: %s", self.address, ex)
-
     async def _handshake_legacy(self, client: BleakClientWithServiceCache) -> None:
         """Legacy probe handshake on FFF0/FFF2."""
         try:
