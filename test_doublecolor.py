@@ -33,7 +33,6 @@ KNOWN_MACS = [
 ]
 
 MODES = {
-    "combination":                 0x0C,
     "steady_white":                0x01,
     "steady_multi":                0x02,
     "fade_white":                  0x03,

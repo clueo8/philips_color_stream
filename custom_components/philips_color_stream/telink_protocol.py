@@ -16,7 +16,6 @@ DEFAULT_PASSWORD  = b"123"
 
 # DoubleColor Effect Modes mapping: name -> mode_id
 DOUBLE_COLOR_EFFECTS: dict[str, int] = {
-    "Combination": 0x0C,
     "Steady White": 0x01,
     "Steady Multi": 0x02,
     "Fade White": 0x03,
