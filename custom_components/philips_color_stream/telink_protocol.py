@@ -14,18 +14,17 @@ BROADCAST_DEST = 0xFFFF
 DEFAULT_MESH_NAME = b"DoubleColor"
 DEFAULT_PASSWORD  = b"123"
 
-# DoubleColor Effect Modes mapping: name -> (mode_id, is_steady)
-DOUBLE_COLOR_EFFECTS: dict[str, tuple[int, bool]] = {
-    "Combo": (0x01, False),
-    "Steady White": (0x02, True),
-    "Fade White": (0x02, False),
-    "Steady Multi": (0x03, True),
-    "Fade Multi": (0x03, False),
-    "Fade Between": (0x04, False),
-    "Twinkle / Flash": (0x05, False),
-    "In Waves": (0x06, False),
-    "Slow Fade": (0x07, False),
-    "Gradient": (0x08, False),
+# DoubleColor Effect Modes mapping: name -> mode_id
+DOUBLE_COLOR_EFFECTS: dict[str, int] = {
+    "Combination": 0x0C,
+    "Steady White": 0x01,
+    "Steady Multi": 0x02,
+    "Fade White": 0x03,
+    "Fade Multi": 0x04,
+    "Flash White": 0x05,
+    "Flash Multi": 0x06,
+    "Fade Between White and Multi": 0x07,
+    "Flash Between White and Multi": 0x08,
 }
 
 
@@ -33,9 +32,7 @@ class TelinkMeshProtocol:
     """Handles Telink pairing crypto, session key derivation, and packet encryption."""
 
     def __init__(self, mac_address: str, mesh_name: bytes = DEFAULT_MESH_NAME, password: bytes = DEFAULT_PASSWORD):
-        self.mac = mac_address
-        mac_clean = "".join(c for c in mac_address if c in "0123456789abcdefABCDEF")
-        self.mac_rev = bytes(reversed(bytes.fromhex(mac_clean)))
+        self.set_mac(mac_address)
         self.mesh_name = mesh_name
         self.password = password
         self.creds = bytes(a ^ b for a, b in zip(
@@ -44,6 +41,17 @@ class TelinkMeshProtocol:
         ))
         self.session_key: bytes | None = None
         self._refresh_seq()
+
+    def set_mac(self, mac_address: str) -> None:
+        """Update MAC and reversed byte representation."""
+        self.mac = mac_address
+        mac_clean = "".join(c for c in mac_address if c in "0123456789abcdefABCDEF")
+        self.mac_rev = bytes(reversed(bytes.fromhex(mac_clean)))
+
+    @property
+    def unicast_mesh_address(self) -> int:
+        """Derive node's unicast mesh address from MAC LSB: 0x0100 | MAC_LSB."""
+        return 0x0100 | self.mac_rev[0]
 
     def _refresh_seq(self) -> None:
         """Start sequence number at a high random 24-bit value to avoid replay filter drops."""
@@ -103,8 +111,17 @@ class TelinkMeshProtocol:
         self._refresh_seq()
         return self.session_key
 
-    def build_command_packet(self, wlt_payload: bytes, seq: bytes | None = None) -> bytes:
-        """Wrap a WLT command payload into a 20-byte encrypted Telink mesh packet."""
+    def build_command_packet(
+        self,
+        wlt_payload: bytes,
+        dest: int | None = None,
+        seq: bytes | None = None,
+    ) -> bytes:
+        """Wrap a WLT command payload into a 20-byte encrypted Telink mesh packet.
+        
+        Defaults to unicast addressing (0x0100 | MAC_LSB) to avoid commanding other strands
+        in the mesh. Pass dest=0xFFFF for broadcast.
+        """
         if self.session_key is None:
             raise RuntimeError("Must complete login handshake before building commands")
         if seq is None:
@@ -113,8 +130,11 @@ class TelinkMeshProtocol:
                 self._seq = 1000
             seq = self._seq.to_bytes(3, "little")
 
+        if dest is None:
+            dest = self.unicast_mesh_address
+
         nonce = bytes(self.mac_rev[0:4]) + b"\x01" + seq
-        dest_bytes = BROADCAST_DEST.to_bytes(2, "little")
+        dest_bytes = dest.to_bytes(2, "little")
         opcode = 0xF0
         inner_payload = (dest_bytes + bytes([opcode]) + VENDOR + wlt_payload).ljust(15, b"\x00")
 
@@ -129,10 +149,9 @@ class TelinkMeshProtocol:
         return b"WLT\x02\x11" + (b"\x01" if on else b"\x02")
 
     @staticmethod
-    def cmd_mode(mode_id: int, steady: bool = False) -> bytes:
-        """574C5402 <mode> <modifier>."""
-        modifier = 0xE0 if steady else 0x00
-        return b"WLT\x02" + bytes([mode_id, modifier])
+    def cmd_mode(mode_id: int) -> bytes:
+        """574C5402 <mode_id> 00."""
+        return b"WLT\x02" + bytes([mode_id, 0x00])
 
     @staticmethod
     def cmd_brightness(percent: int) -> bytes:

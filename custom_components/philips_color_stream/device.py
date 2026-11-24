@@ -97,7 +97,7 @@ class ColorStreamDevice:
 
     def set_ble_device(self, ble_device: BLEDevice) -> None:
         self._ble_device = ble_device
-        self._telink_proto.mac = ble_device.address
+        self._telink_proto.set_mac(ble_device.address)
 
     # ------------------------------------------------------------------ public
 
@@ -126,8 +126,8 @@ class ColorStreamDevice:
         _LOGGER.debug("set_effect called for %s: %s", self.address, name)
         if self._device_type == TYPE_DOUBLE_COLOR:
             if name in DOUBLE_COLOR_EFFECTS:
-                mode_id, steady = DOUBLE_COLOR_EFFECTS[name]
-                await self._send_telink(self._telink_proto.cmd_mode(mode_id, steady))
+                mode_id = DOUBLE_COLOR_EFFECTS[name]
+                await self._send_telink(self._telink_proto.cmd_mode(mode_id))
         else:
             if name in legacy_protocol.LEGACY_EFFECTS:
                 mode_num, modifier = legacy_protocol.LEGACY_EFFECTS[name]

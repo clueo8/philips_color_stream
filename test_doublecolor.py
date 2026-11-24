@@ -33,16 +33,15 @@ KNOWN_MACS = [
 ]
 
 MODES = {
-    "combo":        (0x01, False),
-    "steady_white": (0x02, True),
-    "fade_white":   (0x02, False),
-    "steady_multi": (0x03, True),
-    "fade_multi":   (0x03, False),
-    "fade_between": (0x04, False),
-    "twinkle":      (0x05, False),
-    "in_waves":     (0x06, False),
-    "slow_fade":    (0x07, False),
-    "gradient":     (0x08, False),
+    "combination":                 0x0C,
+    "steady_white":                0x01,
+    "steady_multi":                0x02,
+    "fade_white":                  0x03,
+    "fade_multi":                  0x04,
+    "flash_white":                 0x05,
+    "flash_multi":                 0x06,
+    "fade_between_white_and_multi": 0x07,
+    "flash_between_white_and_multi": 0x08,
 }
 
 
@@ -50,9 +49,7 @@ class TelinkMeshProtocol:
     """Implements the Telink legacy BLE mesh cryptographic protocol."""
 
     def __init__(self, mac_address: str, mesh_name: bytes = DEFAULT_MESH_NAME, password: bytes = DEFAULT_PASSWORD):
-        self.mac = mac_address
-        mac_clean = "".join(c for c in mac_address if c in "0123456789abcdefABCDEF")
-        self.mac_rev = bytes(reversed(bytes.fromhex(mac_clean)))
+        self.set_mac(mac_address)
         self.mesh_name = mesh_name
         self.password = password
         self.creds = bytes(a ^ b for a, b in zip(
@@ -61,6 +58,15 @@ class TelinkMeshProtocol:
         ))
         self.session_key: bytes | None = None
         self._seq = (int.from_bytes(os.urandom(3), "little") & 0x7FFFFF) + 1000
+
+    def set_mac(self, mac_address: str) -> None:
+        self.mac = mac_address
+        mac_clean = "".join(c for c in mac_address if c in "0123456789abcdefABCDEF")
+        self.mac_rev = bytes(reversed(bytes.fromhex(mac_clean)))
+
+    @property
+    def unicast_mesh_address(self) -> int:
+        return 0x0100 | self.mac_rev[0]
 
     @staticmethod
     def enc_noout(key: bytes, value: bytes) -> bytes:
@@ -115,7 +121,12 @@ class TelinkMeshProtocol:
         self._seq = (int.from_bytes(os.urandom(3), "little") & 0x7FFFFF) + 1000
         return self.session_key
 
-    def build_command_packet(self, wlt_payload: bytes, seq: bytes | None = None) -> bytes:
+    def build_command_packet(
+        self,
+        wlt_payload: bytes,
+        dest: int | None = None,
+        seq: bytes | None = None,
+    ) -> bytes:
         """Wrap a WLT command payload into a 20-byte encrypted Telink mesh packet."""
         if self.session_key is None:
             raise RuntimeError("Must complete login handshake before building commands")
@@ -125,8 +136,11 @@ class TelinkMeshProtocol:
                 self._seq = 1000
             seq = self._seq.to_bytes(3, "little")
 
+        if dest is None:
+            dest = self.unicast_mesh_address
+
         nonce = bytes(self.mac_rev[0:4]) + b"\x01" + seq
-        dest_bytes = BROADCAST_DEST.to_bytes(2, "little")
+        dest_bytes = dest.to_bytes(2, "little")
         opcode = 0xF0
         inner_payload = (dest_bytes + bytes([opcode]) + VENDOR + wlt_payload).ljust(15, b"\x00")
 
@@ -140,9 +154,8 @@ class TelinkMeshProtocol:
         return b"WLT\x02\x11" + (b"\x01" if on else b"\x02")
 
     @staticmethod
-    def cmd_mode(mode_id: int, steady: bool = False) -> bytes:
-        modifier = 0xE0 if steady else 0x00
-        return b"WLT\x02" + bytes([mode_id, modifier])
+    def cmd_mode(mode_id: int) -> bytes:
+        return b"WLT\x02" + bytes([mode_id, 0x00])
 
     @staticmethod
     def cmd_brightness(percent: int) -> bytes:
@@ -203,13 +216,13 @@ async def run_command_on_device(mac: str, action: str, param: int | str | None =
         elif action == "mode":
             mode_name = str(param).lower()
             if mode_name in MODES:
-                m_id, steady = MODES[mode_name]
-                print(f"Sending: Mode '{mode_name}' (ID: {m_id}, steady: {steady}) (3 bursts)")
-                payload = proto.cmd_mode(m_id, steady)
+                m_id = MODES[mode_name]
+                print(f"Sending: Mode '{mode_name}' (ID: {m_id}) (3 bursts)")
+                payload = proto.cmd_mode(m_id)
             else:
                 m_id = int(param)
                 print(f"Sending: Mode ID {m_id} (3 bursts)")
-                payload = proto.cmd_mode(m_id, False)
+                payload = proto.cmd_mode(m_id)
         elif action == "speed":
             spd = int(param) if param is not None else 1
             print(f"Sending: Speed {spd} (3 bursts)")
@@ -249,8 +262,11 @@ def main():
         assert sk.hex() == expected_sk, f"Session key mismatch: {sk.hex()} vs {expected_sk}"
         print(" [PASS] Session key derivation matches exactly!")
 
+        assert proto.unicast_mesh_address == 0x015a, f"Unicast address mismatch: {hex(proto.unicast_mesh_address)}"
+        print(" [PASS] Unicast mesh address (0x015a) matches advertising packet #2138!")
+
         test_seq = bytes.fromhex("9f9075")
-        cmd_pkt = proto.build_command_packet(proto.cmd_power(True), seq=test_seq)
+        cmd_pkt = proto.build_command_packet(proto.cmd_power(True), dest=BROADCAST_DEST, seq=test_seq)
         expected_cmd = "9f907552331d89fa5a8e69d5830cbf8b49b15071"
         assert cmd_pkt.hex() == expected_cmd, f"Command packet mismatch: {cmd_pkt.hex()} vs {expected_cmd}"
         print(" [PASS] Power ON encrypted command packet matches btsnoop capture byte-for-byte!")
