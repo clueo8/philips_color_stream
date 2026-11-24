@@ -16,7 +16,7 @@ from .const import DOMAIN
 
 def _is_supported(info: BluetoothServiceInfoBleak) -> bool:
     name = info.name or ""
-    return name.startswith("DoubleColor") or name.startswith("BiColor") or name.startswith("GV_RGB_")
+    return name.startswith("DoubleColor")
 
 
 class ColorStreamConfigFlow(ConfigFlow, domain=DOMAIN):
