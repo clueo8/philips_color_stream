@@ -1,6 +1,6 @@
-# Philips Color Stream / DoubleColor for Home Assistant
+# Philips ColorStream+ for Home Assistant
 
-Custom Home Assistant integration for **Philips ColorStream+** and **Philips Color Stream** Bluetooth Christmas lights.
+Custom Home Assistant integration for **Philips ColorStream+** (`DoubleColor`) Bluetooth Christmas lights powered by the Telink BLE Mesh chipset.
 
 Compatible with **HACS** as a custom integration repository.
 
@@ -8,16 +8,29 @@ Compatible with **HACS** as a custom integration repository.
 
 ## Supported Hardware
 
-1. **Philips ColorStream+ / DoubleColor (Current Generation)**
-   - Hardware: **Telink Semiconductor** BLE Mesh chip (`0x0211`)
-   - Advertising names: `DoubleColor*`, `BiColor*`
-   - Protocol: Telink legacy mesh encrypted protocol + Willis Link Technology (`WLT`) commands
-   - Features: **Power On/Off**, **Brightness (0–100%)**, **10 Built-in Effects**, **Speed Control**
+- **Philips ColorStream+ / DoubleColor**
+  - Chipset: **Telink Semiconductor** BLE Mesh (`0x0211`)
+  - Bluetooth local names: `DoubleColor*`, `BiColor*`
+  - Protocol: Telink BLE Mesh authenticated protocol + Willis Link Technology (`WLT`) commands
+  - Features:
+    - **Instant Power On / Off**
+    - **Brightness (0–100%)**
+    - **8 Built-in Lighting Effects**
+    - **Independent Strand Control (Unicast)**: Control each strand separately with different colors, effects, and states.
+    - **Synchronized "All Strands" Master Entity (Broadcast)**: Hardware mesh broadcast keeping fading and flashing animations in 100% lockstep sync across all strands.
 
-2. **Philips Color Stream (Legacy Generation)**
-   - Advertising names: `GV_RGB_*`
-   - Protocol: Direct unencrypted GATT `FFF0`/`FFF2`
-   - Features: **Power On/Off**, **27 Built-in Effects**, **Speed Control**
+---
+
+## Supported Effects
+
+1. **Steady White**
+2. **Steady Multi**
+3. **Fade White**
+4. **Fade Multi**
+5. **Flash White**
+6. **Flash Multi**
+7. **Fade Between White and Multi**
+8. **Flash Between White and Multi**
 
 ---
 
@@ -25,56 +38,45 @@ Compatible with **HACS** as a custom integration repository.
 
 1. In Home Assistant, open **HACS** → **Integrations**.
 2. Click the three dots menu (**⋮**) in the top right corner and select **Custom repositories**.
-3. Enter your Gitea repository URL:
-   `https://github.clue.giize.com/clue/philips_color_stream` (or your repository URL)
+3. Enter repository URL:
+   `https://github.com/clueo8/philips_color_stream`
 4. Set the Type to **Integration** and click **Add**.
 5. Find **Philips Color Stream**, click **Download**, and restart Home Assistant.
 
 ---
 
-## Configuration & Discovery
+## Configuration & Setup
 
-Once installed and Home Assistant has restarted:
-1. Ensure your Bluetooth adapter or **ESPHome Bluetooth Proxies** are running within range of the lights.
+1. Ensure your Home Assistant Bluetooth adapter or **ESPHome Bluetooth Proxies** are active within range of the lights.
 2. The light strands will be automatically discovered under **Settings → Devices & Services**.
-3. Click **Configure** on each strand to add them.
+3. Click **Configure** on each discovered strand to add it to Home Assistant.
 
-*Note: The lights can only maintain one active Bluetooth connection at a time. The integration automatically disconnects when idle so you can still use the mobile app when desired.*
+### Independent vs. Group Control
 
----
-
-## Supported Effects (DoubleColor)
-
-- **Combo**
-- **Steady White**
-- **Fade White**
-- **Steady Multi**
-- **Fade Multi**
-- **Fade Between**
-- **Twinkle / Flash**
-- **In Waves**
-- **Slow Fade**
-- **Gradient**
+- **Individual Strand Entities**: Each strand entity communicates via unicast. You can turn individual strands on or off, or set one section of your display to *Steady White* while another runs *Steady Multi*.
+- **"All Strands" Master Entity**: Broadcasts directly across the 2.4 GHz hardware RF mesh. Use this master switch when you want to control everything together or run dynamic effects (*Fade Multi*, *Flash White*, etc.) in perfect hardware sync.
+- **Customizable Options**: Click **Configure** on any strand's device card to toggle or move the *All Strands* master broadcast entity.
 
 ---
 
-## Standalone Test Tool
+## Standalone CLI Test Tool
 
 A standalone CLI test script is included at `test_doublecolor.py`:
 
 ```bash
-# Verify cryptographic test vectors
+# Verify internal cryptographic test vectors against HCI packet captures
 python3 test_doublecolor.py test-vectors
 
-# Turn on
+# Power on
 python3 test_doublecolor.py --mac 57:4c:42:01:c9:5a on
 
 # Set brightness to 50%
 python3 test_doublecolor.py --mac 57:4c:42:01:c9:5a brightness 50
 
 # Set effect mode
-python3 test_doublecolor.py --mac 57:4c:42:01:c9:5a mode twinkle
+python3 test_doublecolor.py --mac 57:4c:42:01:c9:5a mode "steady_multi"
+python3 test_doublecolor.py --mac 57:4c:42:01:c9:5a mode "fade_multi"
 
-# Turn off
+# Power off
 python3 test_doublecolor.py --mac 57:4c:42:01:c9:5a off
 ```
