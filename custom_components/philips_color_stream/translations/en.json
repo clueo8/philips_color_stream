@@ -2,7 +2,7 @@
   "config": {
     "step": {
       "user": {
-        "description": "Select the Philips Color Stream / DoubleColor light to add.",
+        "description": "Select the Philips ColorStream+ light to add.",
         "data": {
           "address": "Device"
         }
@@ -13,28 +13,16 @@
     },
     "abort": {
       "already_configured": "Device is already configured",
-      "no_devices_found": "No Philips Color Stream or DoubleColor lights found in Bluetooth range"
-    }
-  },
-  "entity": {
-    "number": {
-      "speed": {
-        "name": "Effect speed"
-      }
-    },
-    "select": {
-      "mode": {
-        "name": "Light mode"
-      }
+      "no_devices_found": "No Philips ColorStream+ lights found in Bluetooth range"
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "Philips Color Stream Options",
+        "title": "Philips ColorStream+ Options",
         "description": "Configure mesh broadcast options for this strand.",
         "data": {
-          "enable_all_strands": "Enable 'All Strands' master entity (broadcasts to all lights in the mesh)"
+          "enable_all_strands": "Enable 'All Strands' master light entity (broadcasts to all lights in the mesh)"
         }
       }
     }

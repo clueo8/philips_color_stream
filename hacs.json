@@ -1,6 +1,6 @@
 {
-  "name": "Philips Color Stream",
-  "description": "Home Assistant integration for Philips ColorStream+ and Philips Color Stream Bluetooth lights",
+  "name": "Philips ColorStream+",
+  "description": "Home Assistant integration for Philips ColorStream+ (DoubleColor) Bluetooth Christmas lights",
   "render_readme": true,
   "homeassistant": "2024.1.0"
 }
