@@ -64,7 +64,6 @@ class ColorStreamDevice:
         self._lock = asyncio.Lock()
         self._disconnect_timer: asyncio.TimerHandle | None = None
         self._use_services_cache: bool = True
-        self._cmd_seq: int = 0
 
         # Telink specific state
         self._telink_proto = TelinkMeshProtocol(ble_device.address)
@@ -109,39 +108,35 @@ class ColorStreamDevice:
 
     # ------------------------------------------------------------------ public
 
-    async def turn_on(self, broadcast: bool = False) -> None:
-        _LOGGER.debug("turn_on called for %s (broadcast=%s)", self.address, broadcast)
+    async def turn_on(self) -> None:
+        _LOGGER.debug("turn_on called for %s", self.address)
         if self._device_type == TYPE_DOUBLE_COLOR:
-            dest = BROADCAST_DEST if broadcast else self._telink_proto.unicast_mesh_address
             # Send 7 bursts (~650ms) to ensure sleeping standby nodes with 500ms sleep
             # intervals are reliably woken on the very first attempt.
-            await self._send_telink(self._telink_proto.cmd_power(True), bursts=7, dest=dest)
+            await self._send_telink(self._telink_proto.cmd_power(True), bursts=7, dest=BROADCAST_DEST)
         else:
             await self._send_legacy(legacy_protocol.cmd_power(self._legacy_id, True))
 
-    async def turn_off(self, broadcast: bool = False) -> None:
-        _LOGGER.debug("turn_off called for %s (broadcast=%s)", self.address, broadcast)
+    async def turn_off(self) -> None:
+        _LOGGER.debug("turn_off called for %s", self.address)
         if self._device_type == TYPE_DOUBLE_COLOR:
-            dest = BROADCAST_DEST if broadcast else self._telink_proto.unicast_mesh_address
-            await self._send_telink(self._telink_proto.cmd_power(False), bursts=6, dest=dest)
+            await self._send_telink(self._telink_proto.cmd_power(False), bursts=6, dest=BROADCAST_DEST)
         else:
             await self._send_legacy(legacy_protocol.cmd_power(self._legacy_id, False))
 
-    async def set_brightness(self, percent: int, broadcast: bool = False) -> None:
-        _LOGGER.debug("set_brightness called for %s: %s%% (broadcast=%s)", self.address, percent, broadcast)
+    async def set_brightness(self, percent: int) -> None:
+        _LOGGER.debug("set_brightness called for %s: %s%%", self.address, percent)
         if self._device_type == TYPE_DOUBLE_COLOR:
-            dest = BROADCAST_DEST if broadcast else self._telink_proto.unicast_mesh_address
-            await self._send_telink(self._telink_proto.cmd_brightness(percent), dest=dest)
+            await self._send_telink(self._telink_proto.cmd_brightness(percent), dest=BROADCAST_DEST)
         else:
             _LOGGER.debug("Brightness not supported by legacy GV_RGB firmware")
 
-    async def set_effect(self, name: str, broadcast: bool = False) -> None:
-        _LOGGER.debug("set_effect called for %s: %s (broadcast=%s)", self.address, name, broadcast)
+    async def set_effect(self, name: str) -> None:
+        _LOGGER.debug("set_effect called for %s: %s", self.address, name)
         if self._device_type == TYPE_DOUBLE_COLOR:
             if name in DOUBLE_COLOR_EFFECTS:
                 mode_id = DOUBLE_COLOR_EFFECTS[name]
-                dest = BROADCAST_DEST if broadcast else self._telink_proto.unicast_mesh_address
-                await self._send_telink(self._telink_proto.cmd_mode(mode_id), dest=dest)
+                await self._send_telink(self._telink_proto.cmd_mode(mode_id), dest=BROADCAST_DEST)
         else:
             if name in legacy_protocol.LEGACY_EFFECTS:
                 mode_num, modifier = legacy_protocol.LEGACY_EFFECTS[name]
@@ -162,17 +157,7 @@ class ColorStreamDevice:
     # ----------------------------------------------------------------- internal
 
     async def _send_telink(self, wlt_payload: bytes, bursts: int = 5, dest: int | None = None) -> None:
-        self._cmd_seq += 1
-        my_seq = self._cmd_seq
         async with self._lock:
-            if my_seq < self._cmd_seq:
-                _LOGGER.debug(
-                    "Skipping superseded command %s on %s (newer command #%d pending)",
-                    wlt_payload.hex(),
-                    self.address,
-                    self._cmd_seq,
-                )
-                return
             for attempt in (1, 2):
                 try:
                     client = await self._ensure_connected()
@@ -185,10 +170,9 @@ class ColorStreamDevice:
                         if b < bursts - 1:
                             await asyncio.sleep(0.10)
                     _LOGGER.debug(
-                        "Successfully transmitted %d bursts to %s (dest=0x%04x): %s",
+                        "Successfully transmitted %d bursts to %s: %s",
                         bursts,
                         self.address,
-                        dest if dest is not None else self._telink_proto.unicast_mesh_address,
                         wlt_payload.hex(),
                     )
                     break
@@ -201,17 +185,7 @@ class ColorStreamDevice:
         self._reset_timer()
 
     async def _send_legacy(self, packet: bytes) -> None:
-        self._cmd_seq += 1
-        my_seq = self._cmd_seq
         async with self._lock:
-            if my_seq < self._cmd_seq:
-                _LOGGER.debug(
-                    "Skipping superseded legacy command %s on %s (newer command #%d pending)",
-                    packet.hex(),
-                    self.address,
-                    self._cmd_seq,
-                )
-                return
             for attempt in (1, 2):
                 try:
                     client = await self._ensure_connected()

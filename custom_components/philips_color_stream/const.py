@@ -11,8 +11,6 @@ MODEL_LEGACY = "Color Stream (GV_RGB)"
 DISCONNECT_DELAY = 45
 DEFAULT_SPEED = 1
 
-CONF_ENABLE_ALL_STRANDS = "enable_all_strands"
-
 # Supported device types
 TYPE_DOUBLE_COLOR = "double_color"
 TYPE_LEGACY_WLT = "legacy_wlt"

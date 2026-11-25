@@ -8,16 +8,10 @@ from homeassistant.components.bluetooth import (
     BluetoothServiceInfoBleak,
     async_discovered_service_info,
 )
-from homeassistant.config_entries import (
-    ConfigEntry,
-    ConfigFlow,
-    ConfigFlowResult,
-    OptionsFlow,
-)
+from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_ADDRESS
-from homeassistant.core import callback
 
-from .const import CONF_ENABLE_ALL_STRANDS, DOMAIN
+from .const import DOMAIN
 
 
 def _is_supported(info: BluetoothServiceInfoBleak) -> bool:
@@ -83,37 +77,5 @@ class ColorStreamConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=vol.Schema(
                 {vol.Required(CONF_ADDRESS): vol.In(self._discovered)}
-            ),
-        )
-
-    @staticmethod
-    @callback
-    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
-        return ColorStreamOptionsFlow()
-
-
-class ColorStreamOptionsFlow(OptionsFlow):
-    async def async_step_init(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        if user_input is not None:
-            return self.async_create_entry(data=user_input)
-
-        entries = self.hass.config_entries.async_entries(DOMAIN)
-        is_first = bool(entries and entries[0].entry_id == self.config_entry.entry_id)
-        current = self.config_entry.options.get(
-            CONF_ENABLE_ALL_STRANDS,
-            self.config_entry.data.get(CONF_ENABLE_ALL_STRANDS, is_first),
-        )
-
-        return self.async_show_form(
-            step_id="init",
-            data_schema=vol.Schema(
-                {
-                    vol.Optional(
-                        CONF_ENABLE_ALL_STRANDS,
-                        default=current,
-                    ): bool,
-                }
             ),
         )

@@ -15,16 +15,5 @@
       "already_configured": "Device is already configured",
       "no_devices_found": "No Philips ColorStream+ lights found in Bluetooth range"
     }
-  },
-  "options": {
-    "step": {
-      "init": {
-        "title": "Philips ColorStream+ Options",
-        "description": "Configure mesh broadcast options for this strand.",
-        "data": {
-          "enable_all_strands": "Enable 'All Strands' master light entity (broadcasts to all lights in the mesh)"
-        }
-      }
-    }
   }
 }
