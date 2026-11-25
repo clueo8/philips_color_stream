@@ -1,7 +1,9 @@
 """Telink Legacy BLE Mesh protocol implementation for DoubleColor / ColorStream+."""
 from __future__ import annotations
 
+import json
 import os
+from pathlib import Path
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 UUID_NOTIFY  = "00010203-0405-0607-0809-0a0b0c0d1911"
@@ -13,6 +15,9 @@ BROADCAST_DEST = 0xFFFF
 
 DEFAULT_MESH_NAME = b"DoubleColor"
 DEFAULT_PASSWORD  = b"123"
+
+SEQ_FILE = Path("/config/.storage/philips_color_stream_seq.json")
+MIN_SEQ = 12_000_000
 
 # DoubleColor Effect Modes mapping: name -> mode_id
 DOUBLE_COLOR_EFFECTS: dict[str, int] = {
@@ -31,8 +36,44 @@ class TelinkMeshProtocol:
     """Handles Telink pairing crypto, session key derivation, and packet encryption."""
 
     # Monotonically increasing sequence number across all instances.
-    # Initialized once to a random 24-bit value on startup, never reset on reconnection.
-    _shared_seq: int = (int.from_bytes(os.urandom(3), "little") & 0x7FFFFF) + 1000
+    # Initialized to at least MIN_SEQ (12M) to guarantee it exceeds any sequence number
+    # ever sent by the mobile app (7.7M) or previous sessions, and persisted to disk across restarts.
+    _shared_seq: int = MIN_SEQ
+    _seq_initialized: bool = False
+
+    @classmethod
+    def _init_seq(cls) -> None:
+        if cls._seq_initialized:
+            return
+        cls._seq_initialized = True
+        try:
+            if SEQ_FILE.exists():
+                with open(SEQ_FILE, "r") as f:
+                    data = json.load(f)
+                    cls._shared_seq = max(int(data.get("seq", MIN_SEQ)), MIN_SEQ)
+            else:
+                cls._shared_seq = MIN_SEQ
+                cls._save_seq()
+        except Exception:
+            cls._shared_seq = MIN_SEQ
+
+    @classmethod
+    def _save_seq(cls) -> None:
+        try:
+            SEQ_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with open(SEQ_FILE, "w") as f:
+                json.dump({"seq": cls._shared_seq}, f)
+        except Exception:
+            pass
+
+    @classmethod
+    def get_next_seq(cls) -> int:
+        cls._init_seq()
+        cls._shared_seq = (cls._shared_seq + 1) & 0xFFFFFF
+        if cls._shared_seq < MIN_SEQ:
+            cls._shared_seq = MIN_SEQ
+        cls._save_seq()
+        return cls._shared_seq
 
     def __init__(self, mac_address: str, mesh_name: bytes = DEFAULT_MESH_NAME, password: bytes = DEFAULT_PASSWORD):
         self.set_mac(mac_address)
@@ -43,6 +84,7 @@ class TelinkMeshProtocol:
             self.password.ljust(16, b"\x00")
         ))
         self.session_key: bytes | None = None
+        TelinkMeshProtocol._init_seq()
         self._seq = TelinkMeshProtocol._shared_seq
 
     def set_mac(self, mac_address: str) -> None:
@@ -58,8 +100,9 @@ class TelinkMeshProtocol:
 
     @classmethod
     def _refresh_seq(cls) -> None:
-        """Start sequence number at a high random 24-bit value to avoid replay filter drops."""
-        cls._shared_seq = (int.from_bytes(os.urandom(3), "little") & 0x7FFFFF) + 1000
+        """Advance sequence number to at least MIN_SEQ."""
+        cls._shared_seq = max(cls._shared_seq, MIN_SEQ)
+        cls._save_seq()
 
     @staticmethod
     def enc_noout(key: bytes, value: bytes) -> bytes:
@@ -128,10 +171,7 @@ class TelinkMeshProtocol:
         if self.session_key is None:
             raise RuntimeError("Must complete login handshake before building commands")
         if seq is None:
-            TelinkMeshProtocol._shared_seq = (TelinkMeshProtocol._shared_seq + 1) & 0xFFFFFF
-            if TelinkMeshProtocol._shared_seq == 0:
-                TelinkMeshProtocol._shared_seq = 1000
-            self._seq = TelinkMeshProtocol._shared_seq
+            self._seq = TelinkMeshProtocol.get_next_seq()
             seq = self._seq.to_bytes(3, "little")
 
         if dest is None:
