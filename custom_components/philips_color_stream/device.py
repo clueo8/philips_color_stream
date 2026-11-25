@@ -63,6 +63,7 @@ class ColorStreamDevice:
         self._lock = asyncio.Lock()
         self._disconnect_timer: asyncio.TimerHandle | None = None
         self._use_services_cache: bool = True
+        self._cmd_seq: int = 0
 
         # Telink specific state
         self._telink_proto = TelinkMeshProtocol(ble_device.address)
@@ -156,8 +157,18 @@ class ColorStreamDevice:
     # ----------------------------------------------------------------- internal
 
     async def _send_telink(self, wlt_payload: bytes, bursts: int = 5) -> None:
+        self._cmd_seq += 1
+        my_seq = self._cmd_seq
         async with self._lock:
-            for attempt in (1, 2, 3):
+            if my_seq < self._cmd_seq:
+                _LOGGER.debug(
+                    "Skipping superseded command %s on %s (newer command #%d pending)",
+                    wlt_payload.hex(),
+                    self.address,
+                    self._cmd_seq,
+                )
+                return
+            for attempt in (1, 2):
                 try:
                     client = await self._ensure_connected()
                     cmd_char = await self._find_char(client, UUID_COMMAND)
@@ -173,13 +184,23 @@ class ColorStreamDevice:
                 except (BleakError, Exception) as err:
                     _LOGGER.warning("Telink write failed on %s (attempt %s): %s", self.address, attempt, err)
                     await self._disconnect_locked()
-                    if attempt == 3:
+                    if attempt == 2:
                         raise
                     await asyncio.sleep(0.5)
         self._reset_timer()
 
     async def _send_legacy(self, packet: bytes) -> None:
+        self._cmd_seq += 1
+        my_seq = self._cmd_seq
         async with self._lock:
+            if my_seq < self._cmd_seq:
+                _LOGGER.debug(
+                    "Skipping superseded legacy command %s on %s (newer command #%d pending)",
+                    packet.hex(),
+                    self.address,
+                    self._cmd_seq,
+                )
+                return
             for attempt in (1, 2):
                 try:
                     client = await self._ensure_connected()
@@ -276,6 +297,7 @@ class ColorStreamDevice:
             self._ble_device.name or self.address,
             disconnected_callback=self._on_disconnected,
             use_services_cache=use_cache,
+            max_attempts=2,
         )
 
         # If cached services are missing required characteristics, immediately clear cache
@@ -295,6 +317,7 @@ class ColorStreamDevice:
                 self._ble_device.name or self.address,
                 disconnected_callback=self._on_disconnected,
                 use_services_cache=False,
+                max_attempts=2,
             )
 
         # If STILL incomplete, abort cleanly so caller's retry loop can re-attempt

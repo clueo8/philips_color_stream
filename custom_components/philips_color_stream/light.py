@@ -59,22 +59,24 @@ class ColorStreamLight(ColorStreamEntity, LightEntity, RestoreEntity):
                 self._attr_brightness = last_bri
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        if not self._attr_is_on or not kwargs:
+        self._attr_is_on = True
+        if (effect := kwargs.get(ATTR_EFFECT)) is not None:
+            self._attr_effect = effect
+        if (brightness := kwargs.get(ATTR_BRIGHTNESS)) is not None:
+            self._attr_brightness = brightness
+        self.async_write_ha_state()
+
+        if not kwargs or ATTR_EFFECT not in kwargs:
             await self._device.turn_on()
 
         if (effect := kwargs.get(ATTR_EFFECT)) is not None:
             await self._device.set_effect(effect)
-            self._attr_effect = effect
 
         if (brightness := kwargs.get(ATTR_BRIGHTNESS)) is not None:
             pct = max(1, min(100, round((brightness / 255.0) * 100)))
             await self._device.set_brightness(pct)
-            self._attr_brightness = brightness
-
-        self._attr_is_on = True
-        self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self._device.turn_off()
         self._attr_is_on = False
         self.async_write_ha_state()
+        await self._device.turn_off()
