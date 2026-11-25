@@ -155,7 +155,7 @@ class ColorStreamDevice:
 
     async def _send_telink(self, wlt_payload: bytes) -> None:
         async with self._lock:
-            for attempt in (1, 2):
+            for attempt in (1, 2, 3):
                 try:
                     client = await self._ensure_connected()
                     cmd_char = await self._find_char(client, UUID_COMMAND)
@@ -170,7 +170,7 @@ class ColorStreamDevice:
                 except (BleakError, Exception) as err:
                     _LOGGER.warning("Telink write failed on %s (attempt %s): %s", self.address, attempt, err)
                     await self._disconnect_locked()
-                    if attempt == 2:
+                    if attempt == 3:
                         raise
                     await asyncio.sleep(0.5)
         self._reset_timer()
@@ -279,17 +279,23 @@ class ColorStreamDevice:
 
         # Validate that required services/characteristics are discovered
         if not self._has_required_services(client):
-            _LOGGER.warning(
-                "Discovered services on %s are incomplete (%s). Clearing client cache and refreshing...",
-                self.address,
-                {s.uuid: [c.uuid for c in s.characteristics] for s in client.services} if client.services else {},
-            )
-            try:
-                if hasattr(client, "clear_cache"):
-                    await client.clear_cache()
-                await client.get_services()
-            except Exception as ex:
-                _LOGGER.debug("Error refreshing services on %s: %s", self.address, ex)
+            # Allow ESPHome Bluetooth Proxy time to complete 128-bit GATT discovery over the air
+            for wait_attempt in range(1, 4):
+                _LOGGER.debug(
+                    "Waiting for full GATT service discovery on %s (attempt %s/3)...",
+                    self.address,
+                    wait_attempt,
+                )
+                await asyncio.sleep(0.8)
+                try:
+                    if hasattr(client, "clear_cache") and wait_attempt == 2:
+                        await client.clear_cache()
+                    await client.get_services()
+                except Exception as ex:
+                    _LOGGER.debug("Error refreshing services on %s: %s", self.address, ex)
+                if self._has_required_services(client):
+                    _LOGGER.debug("Required services discovered on %s on attempt %s", self.address, wait_attempt)
+                    break
 
         # If STILL incomplete after refresh, reconnect once forcing fresh discovery
         if not self._has_required_services(client) and use_cache:
@@ -308,6 +314,30 @@ class ColorStreamDevice:
                 self._ble_device.name or self.address,
                 disconnected_callback=self._on_disconnected,
                 use_services_cache=False,
+            )
+            if not self._has_required_services(client):
+                for wait_attempt in range(1, 4):
+                    await asyncio.sleep(0.8)
+                    try:
+                        await client.get_services()
+                    except Exception:
+                        pass
+                    if self._has_required_services(client):
+                        break
+
+        # If STILL incomplete, abort cleanly so caller's retry loop can re-attempt
+        if not self._has_required_services(client):
+            discovered = {s.uuid: [c.uuid for c in s.characteristics] for s in client.services} if client.services else {}
+            self._force_fresh_services = True
+            try:
+                if hasattr(client, "clear_cache"):
+                    await client.clear_cache()
+                await clear_cache(self.address)
+                await client.disconnect()
+            except Exception:
+                pass
+            raise BleakError(
+                f"Required GATT services not found on {self.address} after discovery. Discovered services: {discovered}"
             )
 
         self._client = client
