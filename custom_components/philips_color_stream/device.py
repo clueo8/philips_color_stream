@@ -110,14 +110,16 @@ class ColorStreamDevice:
     async def turn_on(self) -> None:
         _LOGGER.debug("turn_on called for %s", self.address)
         if self._device_type == TYPE_DOUBLE_COLOR:
-            await self._send_telink(self._telink_proto.cmd_power(True))
+            # Send 7 bursts (~650ms) to ensure sleeping standby nodes with 500ms sleep
+            # intervals are reliably woken on the very first attempt.
+            await self._send_telink(self._telink_proto.cmd_power(True), bursts=7)
         else:
             await self._send_legacy(legacy_protocol.cmd_power(self._legacy_id, True))
 
     async def turn_off(self) -> None:
         _LOGGER.debug("turn_off called for %s", self.address)
         if self._device_type == TYPE_DOUBLE_COLOR:
-            await self._send_telink(self._telink_proto.cmd_power(False))
+            await self._send_telink(self._telink_proto.cmd_power(False), bursts=6)
         else:
             await self._send_legacy(legacy_protocol.cmd_power(self._legacy_id, False))
 
@@ -153,20 +155,20 @@ class ColorStreamDevice:
 
     # ----------------------------------------------------------------- internal
 
-    async def _send_telink(self, wlt_payload: bytes) -> None:
+    async def _send_telink(self, wlt_payload: bytes, bursts: int = 5) -> None:
         async with self._lock:
             for attempt in (1, 2, 3):
                 try:
                     client = await self._ensure_connected()
                     cmd_char = await self._find_char(client, UUID_COMMAND)
-                    # Transmit 4 bursts spaced at ~100ms (matching official app ~105ms timing)
-                    # to guarantee peer mesh nodes catch the broadcast across all RF channels
-                    for b in range(4):
+                    # Transmit bursts spaced at ~100ms (matching official app ~105ms timing).
+                    # Waking up sleeping mesh nodes from standby requires spanning >500ms.
+                    for b in range(bursts):
                         packet = self._telink_proto.build_command_packet(wlt_payload)
                         await client.write_gatt_char(cmd_char, packet, response=False)
-                        if b < 3:
+                        if b < bursts - 1:
                             await asyncio.sleep(0.10)
-                    _LOGGER.debug("Successfully transmitted 4 bursts to %s: %s", self.address, wlt_payload.hex())
+                    _LOGGER.debug("Successfully transmitted %d bursts to %s: %s", bursts, self.address, wlt_payload.hex())
                     break
                 except (BleakError, Exception) as err:
                     _LOGGER.warning("Telink write failed on %s (attempt %s): %s", self.address, attempt, err)
