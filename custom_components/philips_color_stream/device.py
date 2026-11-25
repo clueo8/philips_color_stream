@@ -279,7 +279,6 @@ class ColorStreamDevice:
         # and reconnect fresh with zero artificial delay
         if not self._has_required_services(client) and use_cache:
             _LOGGER.debug("Cached services on %s incomplete. Clearing cache and reconnecting fresh...", self.address)
-            self._use_services_cache = False  # Avoid hitting bad cache again
             try:
                 if hasattr(client, "clear_cache"):
                     await client.clear_cache()
@@ -298,7 +297,6 @@ class ColorStreamDevice:
         # If STILL incomplete, abort cleanly so caller's retry loop can re-attempt
         if not self._has_required_services(client):
             discovered = {s.uuid: [c.uuid for c in s.characteristics] for s in client.services} if client.services else {}
-            self._use_services_cache = False
             try:
                 if hasattr(client, "clear_cache"):
                     await client.clear_cache()
@@ -310,6 +308,8 @@ class ColorStreamDevice:
                 f"Required GATT services not found on {self.address} after discovery. Discovered services: {discovered}"
             )
 
+        # Success - cache is now valid for fast subsequent connections
+        self._use_services_cache = True
         self._client = client
 
         if self._device_type == TYPE_DOUBLE_COLOR:
@@ -361,10 +361,6 @@ class ColorStreamDevice:
                 await client.disconnect()
             except BleakError as err:
                 _LOGGER.debug("Error disconnecting %s: %s", self.address, err)
-        try:
-            await clear_cache(self.address)
-        except Exception:
-            pass
 
     def _reset_timer(self) -> None:
         self._cancel_timer()
