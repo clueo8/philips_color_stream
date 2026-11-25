@@ -159,13 +159,14 @@ class ColorStreamDevice:
                 try:
                     client = await self._ensure_connected()
                     cmd_char = await self._find_char(client, UUID_COMMAND)
-                    # Replicate the official Telink app: transmit 3 bursts with incrementing seq
-                    for b in range(3):
+                    # Transmit 4 bursts spaced at ~100ms (matching official app ~105ms timing)
+                    # to guarantee peer mesh nodes catch the broadcast across all RF channels
+                    for b in range(4):
                         packet = self._telink_proto.build_command_packet(wlt_payload)
                         await client.write_gatt_char(cmd_char, packet, response=False)
-                        if b < 2:
-                            await asyncio.sleep(0.04)
-                    _LOGGER.debug("Successfully transmitted 3 bursts to %s: %s", self.address, wlt_payload.hex())
+                        if b < 3:
+                            await asyncio.sleep(0.10)
+                    _LOGGER.debug("Successfully transmitted 4 bursts to %s: %s", self.address, wlt_payload.hex())
                     break
                 except (BleakError, Exception) as err:
                     _LOGGER.warning("Telink write failed on %s (attempt %s): %s", self.address, attempt, err)

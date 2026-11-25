@@ -229,12 +229,12 @@ async def run_command_on_device(mac: str, action: str, param: int | str | None =
             print(f"Unknown action: {action}")
             return
 
-        for b in range(3):
+        for b in range(4):
             cmd_pkt = proto.build_command_packet(payload)
             await client.write_gatt_char(UUID_COMMAND, cmd_pkt, response=False)
-            if b < 2:
-                await asyncio.sleep(0.04)
-        print("Command transmitted successfully in 3 bursts!")
+            if b < 3:
+                await asyncio.sleep(0.10)
+        print("Command transmitted successfully in 4 bursts!")
 
 
 def main():
