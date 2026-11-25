@@ -26,6 +26,7 @@ from .const import (
 )
 from . import legacy_protocol
 from .telink_protocol import (
+    BROADCAST_DEST,
     DOUBLE_COLOR_EFFECTS,
     TelinkMeshProtocol,
     UUID_COMMAND,
@@ -108,35 +109,39 @@ class ColorStreamDevice:
 
     # ------------------------------------------------------------------ public
 
-    async def turn_on(self) -> None:
-        _LOGGER.debug("turn_on called for %s", self.address)
+    async def turn_on(self, broadcast: bool = False) -> None:
+        _LOGGER.debug("turn_on called for %s (broadcast=%s)", self.address, broadcast)
         if self._device_type == TYPE_DOUBLE_COLOR:
+            dest = BROADCAST_DEST if broadcast else self._telink_proto.unicast_mesh_address
             # Send 7 bursts (~650ms) to ensure sleeping standby nodes with 500ms sleep
             # intervals are reliably woken on the very first attempt.
-            await self._send_telink(self._telink_proto.cmd_power(True), bursts=7)
+            await self._send_telink(self._telink_proto.cmd_power(True), bursts=7, dest=dest)
         else:
             await self._send_legacy(legacy_protocol.cmd_power(self._legacy_id, True))
 
-    async def turn_off(self) -> None:
-        _LOGGER.debug("turn_off called for %s", self.address)
+    async def turn_off(self, broadcast: bool = False) -> None:
+        _LOGGER.debug("turn_off called for %s (broadcast=%s)", self.address, broadcast)
         if self._device_type == TYPE_DOUBLE_COLOR:
-            await self._send_telink(self._telink_proto.cmd_power(False), bursts=6)
+            dest = BROADCAST_DEST if broadcast else self._telink_proto.unicast_mesh_address
+            await self._send_telink(self._telink_proto.cmd_power(False), bursts=6, dest=dest)
         else:
             await self._send_legacy(legacy_protocol.cmd_power(self._legacy_id, False))
 
-    async def set_brightness(self, percent: int) -> None:
-        _LOGGER.debug("set_brightness called for %s: %s%%", self.address, percent)
+    async def set_brightness(self, percent: int, broadcast: bool = False) -> None:
+        _LOGGER.debug("set_brightness called for %s: %s%% (broadcast=%s)", self.address, percent, broadcast)
         if self._device_type == TYPE_DOUBLE_COLOR:
-            await self._send_telink(self._telink_proto.cmd_brightness(percent))
+            dest = BROADCAST_DEST if broadcast else self._telink_proto.unicast_mesh_address
+            await self._send_telink(self._telink_proto.cmd_brightness(percent), dest=dest)
         else:
             _LOGGER.debug("Brightness not supported by legacy GV_RGB firmware")
 
-    async def set_effect(self, name: str) -> None:
-        _LOGGER.debug("set_effect called for %s: %s", self.address, name)
+    async def set_effect(self, name: str, broadcast: bool = False) -> None:
+        _LOGGER.debug("set_effect called for %s: %s (broadcast=%s)", self.address, name, broadcast)
         if self._device_type == TYPE_DOUBLE_COLOR:
             if name in DOUBLE_COLOR_EFFECTS:
                 mode_id = DOUBLE_COLOR_EFFECTS[name]
-                await self._send_telink(self._telink_proto.cmd_mode(mode_id))
+                dest = BROADCAST_DEST if broadcast else self._telink_proto.unicast_mesh_address
+                await self._send_telink(self._telink_proto.cmd_mode(mode_id), dest=dest)
         else:
             if name in legacy_protocol.LEGACY_EFFECTS:
                 mode_num, modifier = legacy_protocol.LEGACY_EFFECTS[name]
@@ -156,7 +161,7 @@ class ColorStreamDevice:
 
     # ----------------------------------------------------------------- internal
 
-    async def _send_telink(self, wlt_payload: bytes, bursts: int = 5) -> None:
+    async def _send_telink(self, wlt_payload: bytes, bursts: int = 5, dest: int | None = None) -> None:
         self._cmd_seq += 1
         my_seq = self._cmd_seq
         async with self._lock:
@@ -175,11 +180,17 @@ class ColorStreamDevice:
                     # Transmit bursts spaced at ~100ms (matching official app ~105ms timing).
                     # Waking up sleeping mesh nodes from standby requires spanning >500ms.
                     for b in range(bursts):
-                        packet = self._telink_proto.build_command_packet(wlt_payload)
+                        packet = self._telink_proto.build_command_packet(wlt_payload, dest=dest)
                         await client.write_gatt_char(cmd_char, packet, response=False)
                         if b < bursts - 1:
                             await asyncio.sleep(0.10)
-                    _LOGGER.debug("Successfully transmitted %d bursts to %s: %s", bursts, self.address, wlt_payload.hex())
+                    _LOGGER.debug(
+                        "Successfully transmitted %d bursts to %s (dest=0x%04x): %s",
+                        bursts,
+                        self.address,
+                        dest if dest is not None else self._telink_proto.unicast_mesh_address,
+                        wlt_payload.hex(),
+                    )
                     break
                 except (BleakError, Exception) as err:
                     _LOGGER.warning("Telink write failed on %s (attempt %s): %s", self.address, attempt, err)

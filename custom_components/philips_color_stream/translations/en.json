@@ -27,5 +27,16 @@
         "name": "Light mode"
       }
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Philips Color Stream Options",
+        "description": "Configure mesh broadcast options for this strand.",
+        "data": {
+          "enable_all_strands": "Enable 'All Strands' master entity (broadcasts to all lights in the mesh)"
+        }
+      }
+    }
   }
 }
