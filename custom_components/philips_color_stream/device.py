@@ -62,7 +62,7 @@ class ColorStreamDevice:
         self._client: BleakClientWithServiceCache | None = None
         self._lock = asyncio.Lock()
         self._disconnect_timer: asyncio.TimerHandle | None = None
-        self._force_fresh_services: bool = False
+        self._use_services_cache: bool = True
 
         # Telink specific state
         self._telink_proto = TelinkMeshProtocol(ble_device.address)
@@ -240,7 +240,7 @@ class ColorStreamDevice:
                         return c
 
         discovered = {s.uuid: [c.uuid for c in s.characteristics] for s in client.services} if client.services else {}
-        self._force_fresh_services = True
+        self._use_services_cache = False
         try:
             if hasattr(client, "clear_cache"):
                 await client.clear_cache()
@@ -265,9 +265,7 @@ class ColorStreamDevice:
             if fresh_ble is not None:
                 self._ble_device = fresh_ble
 
-        use_cache = not self._force_fresh_services
-        self._force_fresh_services = False
-
+        use_cache = self._use_services_cache
         _LOGGER.debug("Connecting to %s (%s, use_services_cache=%s)", self.address, self._device_type, use_cache)
         client = await establish_connection(
             BleakClientWithServiceCache,
@@ -277,35 +275,16 @@ class ColorStreamDevice:
             use_services_cache=use_cache,
         )
 
-        # Validate that required services/characteristics are discovered
-        if not self._has_required_services(client):
-            # Allow ESPHome Bluetooth Proxy time to complete 128-bit GATT discovery over the air
-            for wait_attempt in range(1, 4):
-                _LOGGER.debug(
-                    "Waiting for full GATT service discovery on %s (attempt %s/3)...",
-                    self.address,
-                    wait_attempt,
-                )
-                await asyncio.sleep(0.8)
-                try:
-                    if hasattr(client, "clear_cache") and wait_attempt == 2:
-                        await client.clear_cache()
-                    await client.get_services()
-                except Exception as ex:
-                    _LOGGER.debug("Error refreshing services on %s: %s", self.address, ex)
-                if self._has_required_services(client):
-                    _LOGGER.debug("Required services discovered on %s on attempt %s", self.address, wait_attempt)
-                    break
-
-        # If STILL incomplete after refresh, reconnect once forcing fresh discovery
+        # If cached services are missing required characteristics, immediately clear cache
+        # and reconnect fresh with zero artificial delay
         if not self._has_required_services(client) and use_cache:
-            _LOGGER.warning("Services on %s still incomplete. Reconnecting with fresh service discovery...", self.address)
+            _LOGGER.debug("Cached services on %s incomplete. Clearing cache and reconnecting fresh...", self.address)
+            self._use_services_cache = False  # Avoid hitting bad cache again
             try:
-                await client.disconnect()
-            except Exception:
-                pass
-            try:
+                if hasattr(client, "clear_cache"):
+                    await client.clear_cache()
                 await clear_cache(self.address)
+                await client.disconnect()
             except Exception:
                 pass
             client = await establish_connection(
@@ -315,20 +294,11 @@ class ColorStreamDevice:
                 disconnected_callback=self._on_disconnected,
                 use_services_cache=False,
             )
-            if not self._has_required_services(client):
-                for wait_attempt in range(1, 4):
-                    await asyncio.sleep(0.8)
-                    try:
-                        await client.get_services()
-                    except Exception:
-                        pass
-                    if self._has_required_services(client):
-                        break
 
         # If STILL incomplete, abort cleanly so caller's retry loop can re-attempt
         if not self._has_required_services(client):
             discovered = {s.uuid: [c.uuid for c in s.characteristics] for s in client.services} if client.services else {}
-            self._force_fresh_services = True
+            self._use_services_cache = False
             try:
                 if hasattr(client, "clear_cache"):
                     await client.clear_cache()
